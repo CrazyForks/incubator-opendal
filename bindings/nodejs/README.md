@@ -26,6 +26,25 @@ pnpm run build:theme
 pnpm run docs
 ```
 
+## Tests
+
+Services behavior tests read necessary configs from env vars or the `.env` file.
+
+You can copy [.env.example](/.env.example) to `$(pwd)/.env` and change the values on need, or directly set env vars with `export KEY=VALUE`.
+
+Take `fs` for example, we need to enable bench on `fs` on `/tmp`:
+
+```properties
+OPENDAL_TEST=fs
+OPENDAL_FS_ROOT=/tmp
+```
+
+You can run service behavior tests of enabled with the following command:
+
+```shell
+pnpm build && pnpm test
+```
+
 ## Usage
 
 ```javascript
@@ -48,7 +67,7 @@ main();
 - Start with [Contributing Guide](CONTRIBUTING.md).
 - Submit [Issues](https://github.com/apache/opendal/issues/new) for bug report or feature requests.
 - Asking questions in the [Discussions](https://github.com/apache/opendal/discussions/new?category=q-a).
-- Talk to community at [Discord](https://discord.gg/XQy8yGR2dg).
+  - Talk to community at [Discord](https://opendal.apache.org/discord).
 
 ## License and Trademarks
 

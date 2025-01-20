@@ -10,7 +10,7 @@ This document mainly introduces how a PMC member nominates a new committer.
 Start a vote about the candidate via sending email to: <private@opendal.apache.org>:
 
 - candidate_name: The full name of the candidate.
-- candidate_github_id: The github id of the candidate.
+- candidate_github_id: The GitHub id of the candidate.
 
 Title:
 
@@ -24,16 +24,16 @@ Content:
 Hi, All OpenDAL PMC members.
   
 I'd like to take this chance to call the vote for inviting committed
-contributor ${candidate_name} (github id: ${candidate_github_id}) as a new committer of Apache 
+contributor ${candidate_name} (GitHub id: ${candidate_github_id}) as a new committer of Apache 
 OpenDAL.
 
 ${candidate_contributions}
 
 ${candidate_name}'s great contributions could be found:
 
-- Github Account: https://github.com/${candidate_github_id}
-- Github Pull Requests: https://github.com/apache/opendal/pulls?q=is%3Apr+author%3A${candidate_github_id}+is%3Aclosed
-- Github Issues: https://github.com/apache/opendal/issues?q=is%3Aopen+mentions%3A${candidate_github_id}
+- GitHub Account: https://github.com/${candidate_github_id}
+- GitHub Pull Requests: https://github.com/apache/opendal/pulls?q=is%3Apr+author%3A${candidate_github_id}+is%3Aclosed
+- GitHub Issues: https://github.com/apache/opendal/issues?q=is%3Aopen+mentions%3A${candidate_github_id}
 
 Please make your valuable evaluation on whether we could invite ${candidate_name} as a
 committer:
@@ -148,3 +148,19 @@ ${your_name} (as represents of The Apache OpenDAL PMC)
 After the candidate accepts the invitation and the iCLA is recorded, add the candidate to the committer list by [whimsy roster tools](https://whimsy.apache.org/roster/committee/opendal)
 
 ![](roster-add-committer.png)
+
+## Announcement
+
+Once the nominee accepts the invitation and the commit bit is granted, it's encouraged to send an announcement email to dev@opendal.apache.org to welcome the new committers. Here is an email template:
+
+```text
+Hello, everyone
+
+On behalf of the Apache OpenDAL PMC, I'm happy to announce that
+${candidate_name} has accepted the invitation to become a committer of
+Apache OpenDAL.
+
+Welcome, and thank you for your contributions!
+
+${your name}
+```

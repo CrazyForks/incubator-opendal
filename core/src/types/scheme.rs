@@ -32,6 +32,8 @@ use crate::Error;
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Scheme {
+    /// [aliyun_drive][crate::services::AliyunDrive]: Aliyun Drive services.
+    AliyunDrive,
     /// [atomicserver][crate::services::Atomicserver]: Atomicserver services.
     Atomicserver,
     /// [azblob][crate::services::Azblob]: Azure Storage Blob services.
@@ -40,10 +42,14 @@ pub enum Scheme {
     Azdls,
     /// [B2][crate::services::B2]: Backblaze B2 Services.
     B2,
+    /// [Compfs][crate::services::Compfs]: Compio fs Services.
+    Compfs,
     /// [Seafile][crate::services::Seafile]: Seafile Services.
     Seafile,
     /// [Upyun][crate::services::Upyun]: Upyun Services.
     Upyun,
+    /// [VercelBlob][crate::services::VercelBlob]: VercelBlob Services.
+    VercelBlob,
     /// [YandexDisk][crate::services::YandexDisk]: YandexDisk Services.
     YandexDisk,
     /// [Pcloud][crate::services::Pcloud]: Pcloud Services.
@@ -68,7 +74,7 @@ pub enum Scheme {
     Foundationdb,
     /// [dbfs][crate::services::Dbfs]: DBFS backend support.
     Dbfs,
-    /// [fs][crate::services::Fs]: POSIX alike file system.
+    /// [fs][crate::services::Fs]: POSIX-like file system.
     Fs,
     /// [ftp][crate::services::Ftp]: FTP backend.
     Ftp,
@@ -82,16 +88,16 @@ pub enum Scheme {
     Http,
     /// [huggingface][crate::services::Huggingface]: Huggingface services.
     Huggingface,
-    /// [alluxio][created::services::Alluxio]: Alluxio services.
+    /// [alluxio][crate::services::Alluxio]: Alluxio services.
     Alluxio,
 
     /// [ipmfs][crate::services::Ipfs]: IPFS HTTP Gateway
     Ipfs,
     /// [ipmfs][crate::services::Ipmfs]: IPFS mutable file system
     Ipmfs,
-    /// [memcached][crate::services::Memcached]: Memcached service support.
-    Icloud,
     /// [icloud][crate::services::Icloud]: APPLE icloud services.
+    Icloud,
+    /// [memcached][crate::services::Memcached]: Memcached service support.
     Memcached,
     /// [memory][crate::services::Memory]: In memory backend support.
     Memory,
@@ -99,6 +105,8 @@ pub enum Scheme {
     MiniMoka,
     /// [moka][crate::services::Moka]: moka backend support.
     Moka,
+    /// [monoiofs][crate::services::Monoiofs]: monoio fs services.
+    Monoiofs,
     /// [obs][crate::services::Obs]: Huawei Cloud OBS services.
     Obs,
     /// [onedrive][crate::services::Onedrive]: Microsoft OneDrive services.
@@ -141,22 +149,30 @@ pub enum Scheme {
     Webhdfs,
     /// [redb][crate::services::Redb]: Redb Services
     Redb,
-    /// [tikv][crate::services::tikv]: Tikv Services
+    /// [tikv][crate::services::Tikv]: Tikv Services
     Tikv,
-    /// [azfile][crate::services::azfile]: Azfile Services
+    /// [azfile][crate::services::Azfile]: Azfile Services
     Azfile,
-    /// [mongodb](crate::services::mongodb): MongoDB Services
+    /// [mongodb](crate::services::Mongodb): MongoDB Services
     Mongodb,
-    /// [gridfs](crate::services::gridfs): MongoDB Gridfs Services
+    /// [gridfs](crate::services::Gridfs): MongoDB Gridfs Services
     Gridfs,
-    /// [Native HDFS](crate::services::hdfs_native): Hdfs Native service, using rust hdfs-native client for hdfs
+    /// [Github Contents][crate::services::Github]: Github contents support.
+    Github,
+    /// [Native HDFS](crate::services::HdfsNative): Hdfs Native service, using rust hdfs-native client for hdfs
     HdfsNative,
+    /// [surrealdb](crate::services::Surrealdb): Surrealdb Services
+    Surrealdb,
+    /// [lakefs](crate::services::Lakefs): LakeFS Services
+    Lakefs,
+    /// [NebulaGraph](crate::services::NebulaGraph): NebulaGraph Services
+    NebulaGraph,
     /// Custom that allow users to implement services outside of OpenDAL.
     ///
     /// # NOTE
     ///
     /// - Custom must not overwrite any existing services name.
-    /// - Custom must be lowed cases.
+    /// - Custom must be in lower case.
     Custom(&'static str),
 }
 
@@ -173,7 +189,7 @@ impl Scheme {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```rust,no_run
     /// use opendal::Scheme;
     ///
     /// let enabled_schemes = Scheme::enabled();
@@ -183,6 +199,8 @@ impl Scheme {
     /// ```
     pub fn enabled() -> HashSet<Scheme> {
         HashSet::from([
+            #[cfg(feature = "services-aliyun-drive")]
+            Scheme::AliyunDrive,
             #[cfg(feature = "services-atomicserver")]
             Scheme::Atomicserver,
             #[cfg(feature = "services-alluxio")]
@@ -199,6 +217,8 @@ impl Scheme {
             Scheme::Cacache,
             #[cfg(feature = "services-cos")]
             Scheme::Cos,
+            #[cfg(feature = "services-compfs")]
+            Scheme::Compfs,
             #[cfg(feature = "services-dashmap")]
             Scheme::Dashmap,
             #[cfg(feature = "services-dropbox")]
@@ -237,6 +257,8 @@ impl Scheme {
             Scheme::MiniMoka,
             #[cfg(feature = "services-moka")]
             Scheme::Moka,
+            #[cfg(feature = "services-monoiofs")]
+            Scheme::Monoiofs,
             #[cfg(feature = "services-mysql")]
             Scheme::Mysql,
             #[cfg(feature = "services-obs")]
@@ -279,6 +301,8 @@ impl Scheme {
             Scheme::Tikv,
             #[cfg(feature = "services-vercel-artifacts")]
             Scheme::VercelArtifacts,
+            #[cfg(feature = "services-vercel-blob")]
+            Scheme::VercelBlob,
             #[cfg(feature = "services-webdav")]
             Scheme::Webdav,
             #[cfg(feature = "services-webhdfs")]
@@ -289,6 +313,12 @@ impl Scheme {
             Scheme::Mongodb,
             #[cfg(feature = "services-hdfs-native")]
             Scheme::HdfsNative,
+            #[cfg(feature = "services-surrealdb")]
+            Scheme::Surrealdb,
+            #[cfg(feature = "services-lakefs")]
+            Scheme::Lakefs,
+            #[cfg(feature = "services-nebula-graph")]
+            Scheme::NebulaGraph,
         ])
     }
 }
@@ -311,6 +341,7 @@ impl FromStr for Scheme {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_lowercase();
         match s.as_str() {
+            "aliyun_drive" => Ok(Scheme::AliyunDrive),
             "atomicserver" => Ok(Scheme::Atomicserver),
             "azblob" => Ok(Scheme::Azblob),
             "alluxio" => Ok(Scheme::Alluxio),
@@ -322,6 +353,7 @@ impl FromStr for Scheme {
             "b2" => Ok(Scheme::B2),
             "chainsafe" => Ok(Scheme::Chainsafe),
             "cacache" => Ok(Scheme::Cacache),
+            "compfs" => Ok(Scheme::Compfs),
             "cloudflare_kv" => Ok(Scheme::CloudflareKv),
             "cos" => Ok(Scheme::Cos),
             "d1" => Ok(Scheme::D1),
@@ -334,6 +366,7 @@ impl FromStr for Scheme {
             "gdrive" => Ok(Scheme::Gdrive),
             "ghac" => Ok(Scheme::Ghac),
             "gridfs" => Ok(Scheme::Gridfs),
+            "github" => Ok(Scheme::Github),
             "hdfs" => Ok(Scheme::Hdfs),
             "http" | "https" => Ok(Scheme::Http),
             "huggingface" | "hf" => Ok(Scheme::Huggingface),
@@ -349,6 +382,7 @@ impl FromStr for Scheme {
             "sqlite" => Ok(Scheme::Sqlite),
             "mini_moka" => Ok(Scheme::MiniMoka),
             "moka" => Ok(Scheme::Moka),
+            "monoiofs" => Ok(Scheme::Monoiofs),
             "obs" => Ok(Scheme::Obs),
             "onedrive" => Ok(Scheme::Onedrive),
             "persy" => Ok(Scheme::Persy),
@@ -367,12 +401,16 @@ impl FromStr for Scheme {
             "swift" => Ok(Scheme::Swift),
             "oss" => Ok(Scheme::Oss),
             "vercel_artifacts" => Ok(Scheme::VercelArtifacts),
+            "vercel_blob" => Ok(Scheme::VercelBlob),
             "webdav" => Ok(Scheme::Webdav),
             "webhdfs" => Ok(Scheme::Webhdfs),
             "tikv" => Ok(Scheme::Tikv),
             "azfile" => Ok(Scheme::Azfile),
             "mongodb" => Ok(Scheme::Mongodb),
             "hdfs_native" => Ok(Scheme::HdfsNative),
+            "surrealdb" => Ok(Scheme::Surrealdb),
+            "lakefs" => Ok(Scheme::Lakefs),
+            "nebula_graph" => Ok(Scheme::NebulaGraph),
             _ => Ok(Scheme::Custom(Box::leak(s.into_boxed_str()))),
         }
     }
@@ -381,6 +419,7 @@ impl FromStr for Scheme {
 impl From<Scheme> for &'static str {
     fn from(v: Scheme) -> Self {
         match v {
+            Scheme::AliyunDrive => "aliyun_drive",
             Scheme::Atomicserver => "atomicserver",
             Scheme::Azblob => "azblob",
             Scheme::Azdls => "azdls",
@@ -389,6 +428,7 @@ impl From<Scheme> for &'static str {
             Scheme::Cacache => "cacache",
             Scheme::CloudflareKv => "cloudflare_kv",
             Scheme::Cos => "cos",
+            Scheme::Compfs => "compfs",
             Scheme::D1 => "d1",
             Scheme::Dashmap => "dashmap",
             Scheme::Etcd => "etcd",
@@ -411,12 +451,14 @@ impl From<Scheme> for &'static str {
             Scheme::Memory => "memory",
             Scheme::MiniMoka => "mini_moka",
             Scheme::Moka => "moka",
+            Scheme::Monoiofs => "monoiofs",
             Scheme::Obs => "obs",
             Scheme::Onedrive => "onedrive",
             Scheme::Persy => "persy",
             Scheme::Postgresql => "postgresql",
             Scheme::Mysql => "mysql",
             Scheme::Gdrive => "gdrive",
+            Scheme::Github => "github",
             Scheme::Dropbox => "dropbox",
             Scheme::Redis => "redis",
             Scheme::Rocksdb => "rocksdb",
@@ -427,6 +469,7 @@ impl From<Scheme> for &'static str {
             Scheme::Supabase => "supabase",
             Scheme::Swift => "swift",
             Scheme::VercelArtifacts => "vercel_artifacts",
+            Scheme::VercelBlob => "vercel_blob",
             Scheme::Oss => "oss",
             Scheme::Webdav => "webdav",
             Scheme::Webhdfs => "webhdfs",
@@ -440,6 +483,9 @@ impl From<Scheme> for &'static str {
             Scheme::YandexDisk => "yandex_disk",
             Scheme::Pcloud => "pcloud",
             Scheme::HdfsNative => "hdfs_native",
+            Scheme::Surrealdb => "surrealdb",
+            Scheme::Lakefs => "lakefs",
+            Scheme::NebulaGraph => "nebula_graph",
             Scheme::Custom(v) => v,
         }
     }

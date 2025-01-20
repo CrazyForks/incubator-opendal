@@ -17,11 +17,11 @@
 
 [package]
 edition = "2021"
+license = "Apache-2.0"
 name = "opendal-fuzz"
 publish = false
+rust-version = "1.75"
 version = "0.0.0"
-
-license.workspace = true
 
 [package.metadata]
 cargo-fuzz = true
@@ -74,7 +74,6 @@ services-swift = ["opendal/services-swift"]
 services-tikv = ["opendal/services-tikv"]
 services-upyun = ["opendal/services-upyun"]
 services-vercel-artifacts = ["opendal/services-vercel-artifacts"]
-services-wasabi = ["opendal/services-wasabi"]
 services-webdav = ["opendal/services-webdav"]
 services-webhdfs = ["opendal/services-webhdfs"]
 

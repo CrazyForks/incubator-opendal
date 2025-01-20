@@ -15,18 +15,21 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use async_trait::async_trait;
-use bytes::{Buf, Bytes};
 use std::collections::BTreeMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::sync::Arc;
 
+use bytes::Buf;
+use bytes::Bytes;
 use http::header;
-use http::header::{IF_MATCH, IF_NONE_MATCH};
+use http::header::IF_MATCH;
+use http::header::IF_NONE_MATCH;
 use http::Request;
 use http::Response;
 use http::StatusCode;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json::json;
 use tokio::sync::Mutex;
 
@@ -72,6 +75,12 @@ pub struct SessionData {
     cookies: BTreeMap<String, String>,
     drivews_url: String,
     docws_url: String,
+}
+
+impl Default for SessionData {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl SessionData {
@@ -149,19 +158,19 @@ impl IcloudSigner {
 
         let mut req = Request::post(uri)
             .header(header::CONTENT_TYPE, "application/json")
-            .body(AsyncBody::Bytes(Bytes::from(body)))
+            .body(Buffer::from(Bytes::from(body)))
             .map_err(new_request_build_error)?;
         self.sign(&mut req)?;
 
         let resp = self.client.send(req).await?;
         if resp.status() != StatusCode::OK {
-            return Err(parse_error(resp).await?);
+            return Err(parse_error(resp));
         }
 
         if let Some(rscd) = resp.headers().get(APPLE_RESPONSE_HEADER) {
             let status_code = StatusCode::from_bytes(rscd.as_bytes()).unwrap();
             if status_code != StatusCode::CONFLICT {
-                return Err(parse_error(resp).await?);
+                return Err(parse_error(resp));
             }
         }
 
@@ -176,21 +185,21 @@ impl IcloudSigner {
 
         let mut req = Request::post(uri)
             .header(header::CONTENT_TYPE, "application/json")
-            .body(AsyncBody::Bytes(Bytes::from(body)))
+            .body(Buffer::from(Bytes::from(body)))
             .map_err(new_request_build_error)?;
         self.sign(&mut req)?;
 
         let resp = self.client.send(req).await?;
         if resp.status() != StatusCode::OK {
-            return Err(parse_error(resp).await?);
+            return Err(parse_error(resp));
         }
 
-        // Updata SessionData cookies.We need obtain `X-APPLE-WEBAUTH-USER` cookie to get file.
+        // Update SessionData cookies.We need obtain `X-APPLE-WEBAUTH-USER` cookie to get file.
         self.update(&resp)?;
 
-        let bs = resp.into_body().bytes().await?;
+        let bs = resp.into_body();
         let auth_info: IcloudWebservicesResponse =
-            serde_json::from_slice(&bs).map_err(new_json_deserialize_error)?;
+            serde_json::from_reader(bs.reader()).map_err(new_json_deserialize_error)?;
 
         // Check if we have extra challenge to take.
         if auth_info.hsa_challenge_required && !auth_info.hsa_trusted_browser {
@@ -265,7 +274,7 @@ impl IcloudSigner {
     }
 
     /// Update signer's data after request sent out.
-    fn update(&mut self, resp: &Response<IncomingAsyncBody>) -> Result<()> {
+    fn update(&mut self, resp: &Response<Buffer>) -> Result<()> {
         if let Some(account_country) = parse_header_to_str(resp.headers(), ACCOUNT_COUNTRY_HEADER)?
         {
             self.data.account_country = Some(account_country.to_string());
@@ -302,10 +311,7 @@ impl IcloudSigner {
     /// - Init the signer if it's not initiated.
     /// - Sign the request.
     /// - Update the session data if needed.
-    pub async fn send(
-        &mut self,
-        mut req: Request<AsyncBody>,
-    ) -> Result<Response<IncomingAsyncBody>> {
+    pub async fn send(&mut self, mut req: Request<Buffer>) -> Result<Response<Buffer>> {
         self.sign(&mut req)?;
         let resp = self.client.send(req).await?;
 
@@ -347,15 +353,15 @@ impl IcloudCore {
         .map_err(new_json_serialize_error)?;
 
         let req = Request::post(uri)
-            .body(AsyncBody::Bytes(Bytes::from(body)))
+            .body(Buffer::from(Bytes::from(body)))
             .map_err(new_request_build_error)?;
 
         let resp = signer.send(req).await?;
         if resp.status() != StatusCode::OK {
-            return Err(parse_error(resp).await?);
+            return Err(parse_error(resp));
         }
 
-        let body = resp.into_body().bytes().await?;
+        let body = resp.into_body();
         let drive_node: Vec<IcloudRoot> =
             serde_json::from_slice(body.chunk()).map_err(new_json_deserialize_error)?;
         Ok(drive_node[0].clone())
@@ -365,8 +371,9 @@ impl IcloudCore {
         &self,
         id: &str,
         zone: &str,
+        range: BytesRange,
         args: OpRead,
-    ) -> Result<Response<IncomingAsyncBody>> {
+    ) -> Result<Response<HttpBody>> {
         let mut signer = self.signer.lock().await;
 
         let uri = format!(
@@ -377,15 +384,15 @@ impl IcloudCore {
         );
 
         let req = Request::get(uri)
-            .body(AsyncBody::Empty)
+            .body(Buffer::new())
             .map_err(new_request_build_error)?;
 
         let resp = signer.send(req).await?;
         if resp.status() != StatusCode::OK {
-            return Err(parse_error(resp).await?);
+            return Err(parse_error(resp));
         }
 
-        let body = resp.into_body().bytes().await?;
+        let body = resp.into_body();
         let object: IcloudObject =
             serde_json::from_slice(body.chunk()).map_err(new_json_deserialize_error)?;
 
@@ -397,35 +404,37 @@ impl IcloudCore {
             req = req.header(IF_MATCH, if_match);
         }
 
-        let range = args.range();
-        if !range.is_full() {
+        if range.is_full() {
             req = req.header(header::RANGE, range.to_header())
         }
         if let Some(if_none_match) = args.if_none_match() {
             req = req.header(IF_NONE_MATCH, if_none_match);
         }
 
-        let req = req
-            .body(AsyncBody::Empty)
-            .map_err(new_request_build_error)?;
+        let req = req.body(Buffer::new()).map_err(new_request_build_error)?;
 
-        let resp = signer.client.send(req).await?;
+        let resp = signer.client.fetch(req).await?;
 
         Ok(resp)
     }
 
-    pub async fn read(&self, path: &str, args: &OpRead) -> Result<Response<IncomingAsyncBody>> {
+    pub async fn read(
+        &self,
+        path: &str,
+        range: BytesRange,
+        args: &OpRead,
+    ) -> Result<Response<HttpBody>> {
         let path = build_rooted_abs_path(&self.root, path);
         let base = get_basename(&path);
 
         let path_id = self.path_cache.get(base).await?.ok_or(Error::new(
             ErrorKind::NotFound,
-            &format!("read path not found: {}", base),
+            format!("read path not found: {}", base),
         ))?;
 
         if let Some(docwsid) = path_id.strip_prefix("FILE::com.apple.CloudDocs::") {
             Ok(self
-                .get_file(docwsid, "com.apple.CloudDocs", args.clone())
+                .get_file(docwsid, "com.apple.CloudDocs", range, args.clone())
                 .await?)
         } else {
             Err(Error::new(
@@ -447,12 +456,12 @@ impl IcloudCore {
 
         let file_id = self.path_cache.get(base).await?.ok_or(Error::new(
             ErrorKind::NotFound,
-            &format!("stat path not found: {}", base),
+            format!("stat path not found: {}", base),
         ))?;
 
         let folder_id = self.path_cache.get(parent).await?.ok_or(Error::new(
             ErrorKind::NotFound,
-            &format!("stat path not found: {}", parent),
+            format!("stat path not found: {}", parent),
         ))?;
 
         let node = self.get_root(&folder_id).await?;
@@ -477,7 +486,6 @@ impl IcloudPathQuery {
     }
 }
 
-#[async_trait]
 impl PathQuery for IcloudPathQuery {
     async fn root(&self) -> Result<String> {
         Ok("FOLDER::com.apple.CloudDocs::root".to_string())
@@ -504,25 +512,25 @@ impl PathQuery for IcloudPathQuery {
         .map_err(new_json_serialize_error)?;
 
         let req = Request::post(uri)
-            .body(AsyncBody::Bytes(Bytes::from(body)))
+            .body(Buffer::from(Bytes::from(body)))
             .map_err(new_request_build_error)?;
 
         let resp = signer.send(req).await?;
         if resp.status() != StatusCode::OK {
-            return Err(parse_error(resp).await?);
+            return Err(parse_error(resp));
         }
 
-        let body = resp.into_body().bytes().await?;
+        let body = resp.into_body();
         let root: Vec<IcloudRoot> =
             serde_json::from_slice(body.chunk()).map_err(new_json_deserialize_error)?;
 
         let node = &root[0];
 
-        let id = match node.items.iter().find(|it| it.name == name) {
-            Some(it) => Ok(Some(it.drivewsid.clone())),
-            None => Ok(None),
-        }?;
-        Ok(id)
+        Ok(node
+            .items
+            .iter()
+            .find(|it| it.name == name)
+            .map(|it| it.drivewsid.clone()))
     }
 
     async fn create_dir(&self, parent_id: &str, name: &str) -> Result<String> {
@@ -545,24 +553,24 @@ impl PathQuery for IcloudPathQuery {
         .map_err(new_json_serialize_error)?;
 
         let req = Request::post(uri)
-            .body(AsyncBody::Bytes(Bytes::from(body)))
+            .body(Buffer::from(Bytes::from(body)))
             .map_err(new_request_build_error)?;
 
         let resp = signer.send(req).await?;
         if resp.status() != StatusCode::OK {
-            return Err(parse_error(resp).await?);
+            return Err(parse_error(resp));
         }
 
-        let body = resp.into_body().bytes().await?;
+        let body = resp.into_body();
         let create_folder: IcloudCreateFolder =
             serde_json::from_slice(body.chunk()).map_err(new_json_deserialize_error)?;
         Ok(create_folder.destination_drivews_id)
     }
 }
 
-pub async fn parse_error(resp: Response<IncomingAsyncBody>) -> Result<Error> {
+pub(super) fn parse_error(resp: Response<Buffer>) -> Error {
     let (parts, body) = resp.into_parts();
-    let bs = body.bytes().await?;
+    let bs = body.to_bytes();
 
     let mut kind = match parts.status.as_u16() {
         421 | 450 | 500 => ErrorKind::NotFound,
@@ -582,11 +590,11 @@ pub async fn parse_error(resp: Response<IncomingAsyncBody>) -> Result<Error> {
         }
     }
 
-    let mut err = Error::new(kind, &message);
+    let mut err = Error::new(kind, message);
 
     err = with_error_response_context(err, parts);
 
-    Ok(err)
+    err
 }
 
 #[derive(Default, Debug, Deserialize)]
@@ -597,6 +605,7 @@ struct IcloudError {
 }
 
 #[derive(Default, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct IcloudWebservicesResponse {
     #[serde(default)]
     pub hsa_challenge_required: bool,
@@ -612,18 +621,14 @@ pub struct Webservices {
 }
 
 #[derive(Deserialize, Default, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct Drivews {
-    #[serde(rename = "pcsRequired")]
-    pub pcs_required: bool,
-    pub status: String,
     pub url: Option<String>,
 }
 
 #[derive(Deserialize, Default, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct Docws {
-    #[serde(rename = "pcsRequired")]
-    pub pcs_required: bool,
-    pub status: String,
     pub url: Option<String>,
 }
 
@@ -706,7 +711,10 @@ pub struct IcloudCreateFolder {
 
 #[cfg(test)]
 mod tests {
-    use super::{IcloudRoot, IcloudWebservicesResponse};
+    use pretty_assertions::assert_eq;
+
+    use super::IcloudRoot;
+    use super::IcloudWebservicesResponse;
 
     #[test]
     fn test_parse_icloud_drive_root_json() {
@@ -794,7 +802,6 @@ mod tests {
           "etag": "w9",
           "fileCount": 22,
           "items": [
-            {
             {
               "dateChanged": "2021-02-18T14:10:46Z",
               "dateCreated": "2021-02-10T07:01:34Z",

@@ -15,7 +15,6 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use async_trait::async_trait;
 use http::StatusCode;
 use uuid::Uuid;
 
@@ -40,9 +39,8 @@ impl WebhdfsWriter {
     }
 }
 
-#[async_trait]
 impl oio::BlockWrite for WebhdfsWriter {
-    async fn write_once(&self, size: u64, body: AsyncBody) -> Result<()> {
+    async fn write_once(&self, size: u64, body: Buffer) -> Result<()> {
         let req = self
             .backend
             .webhdfs_create_object_request(&self.path, Some(size), &self.op, body)
@@ -52,15 +50,12 @@ impl oio::BlockWrite for WebhdfsWriter {
 
         let status = resp.status();
         match status {
-            StatusCode::CREATED | StatusCode::OK => {
-                resp.into_body().consume().await?;
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::CREATED | StatusCode::OK => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 
-    async fn write_block(&self, block_id: Uuid, size: u64, body: AsyncBody) -> Result<()> {
+    async fn write_block(&self, block_id: Uuid, size: u64, body: Buffer) -> Result<()> {
         let Some(ref atomic_write_dir) = self.backend.atomic_write_dir else {
             return Err(Error::new(
                 ErrorKind::Unsupported,
@@ -81,11 +76,8 @@ impl oio::BlockWrite for WebhdfsWriter {
 
         let status = resp.status();
         match status {
-            StatusCode::CREATED | StatusCode::OK => {
-                resp.into_body().consume().await?;
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::CREATED | StatusCode::OK => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -112,14 +104,14 @@ impl oio::BlockWrite for WebhdfsWriter {
             let status = resp.status();
 
             if status != StatusCode::OK {
-                return Err(parse_error(resp).await?);
+                return Err(parse_error(resp));
             }
         }
         // delete the path file
         let resp = self.backend.webhdfs_delete(&self.path).await?;
         let status = resp.status();
         if status != StatusCode::OK {
-            return Err(parse_error(resp).await?);
+            return Err(parse_error(resp));
         }
 
         // rename concat file to path
@@ -131,11 +123,8 @@ impl oio::BlockWrite for WebhdfsWriter {
         let status = resp.status();
 
         match status {
-            StatusCode::OK => {
-                resp.into_body().consume().await?;
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::OK => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -143,23 +132,20 @@ impl oio::BlockWrite for WebhdfsWriter {
         for block_id in block_ids {
             let resp = self.backend.webhdfs_delete(&block_id.to_string()).await?;
             match resp.status() {
-                StatusCode::OK => {
-                    resp.into_body().consume().await?;
-                }
-                _ => return Err(parse_error(resp).await?),
+                StatusCode::OK => {}
+                _ => return Err(parse_error(resp)),
             }
         }
         Ok(())
     }
 }
 
-#[async_trait]
 impl oio::AppendWrite for WebhdfsWriter {
     async fn offset(&self) -> Result<u64> {
         Ok(0)
     }
 
-    async fn append(&self, _offset: u64, size: u64, body: AsyncBody) -> Result<()> {
+    async fn append(&self, _offset: u64, size: u64, body: Buffer) -> Result<()> {
         let resp = self.backend.webhdfs_get_file_status(&self.path).await?;
 
         let status = resp.status();
@@ -173,7 +159,7 @@ impl oio::AppendWrite for WebhdfsWriter {
             StatusCode::NOT_FOUND => {
                 let req = self
                     .backend
-                    .webhdfs_create_object_request(&self.path, None, &self.op, AsyncBody::Empty)
+                    .webhdfs_create_object_request(&self.path, None, &self.op, Buffer::new())
                     .await?;
 
                 let resp = self.backend.client.send(req).await?;
@@ -182,30 +168,22 @@ impl oio::AppendWrite for WebhdfsWriter {
 
                 match status {
                     StatusCode::CREATED | StatusCode::OK => {
-                        resp.into_body().consume().await?;
-
                         location = self.backend.webhdfs_init_append_request(&self.path).await?;
                     }
-                    _ => return Err(parse_error(resp).await?),
+                    _ => return Err(parse_error(resp)),
                 }
             }
-            _ => return Err(parse_error(resp).await?),
+            _ => return Err(parse_error(resp)),
         }
 
-        let req = self
-            .backend
-            .webhdfs_append_request(&location, size, body)
-            .await?;
+        let req = self.backend.webhdfs_append_request(&location, size, body)?;
 
         let resp = self.backend.client.send(req).await?;
 
         let status = resp.status();
         match status {
-            StatusCode::OK => {
-                resp.into_body().consume().await?;
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::OK => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 }

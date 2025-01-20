@@ -17,7 +17,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use http::StatusCode;
 
 use super::core::*;
@@ -44,9 +43,8 @@ impl CosWriter {
     }
 }
 
-#[async_trait]
 impl oio::MultipartWrite for CosWriter {
-    async fn write_once(&self, size: u64, body: AsyncBody) -> Result<()> {
+    async fn write_once(&self, size: u64, body: Buffer) -> Result<()> {
         let mut req = self
             .core
             .cos_put_object_request(&self.path, Some(size), &self.op, body)?;
@@ -58,11 +56,8 @@ impl oio::MultipartWrite for CosWriter {
         let status = resp.status();
 
         match status {
-            StatusCode::CREATED | StatusCode::OK => {
-                resp.into_body().consume().await?;
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::CREATED | StatusCode::OK => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -76,7 +71,7 @@ impl oio::MultipartWrite for CosWriter {
 
         match status {
             StatusCode::OK => {
-                let bs = resp.into_body().bytes().await?;
+                let bs = resp.into_body();
 
                 let result: InitiateMultipartUploadResult =
                     quick_xml::de::from_reader(bytes::Buf::reader(bs))
@@ -84,7 +79,7 @@ impl oio::MultipartWrite for CosWriter {
 
                 Ok(result.upload_id)
             }
-            _ => Err(parse_error(resp).await?),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -93,7 +88,7 @@ impl oio::MultipartWrite for CosWriter {
         upload_id: &str,
         part_number: usize,
         size: u64,
-        body: AsyncBody,
+        body: Buffer,
     ) -> Result<oio::MultipartPart> {
         // COS requires part number must between [1..=10000]
         let part_number = part_number + 1;
@@ -116,11 +111,13 @@ impl oio::MultipartWrite for CosWriter {
                     })?
                     .to_string();
 
-                resp.into_body().consume().await?;
-
-                Ok(oio::MultipartPart { part_number, etag })
+                Ok(oio::MultipartPart {
+                    part_number,
+                    etag,
+                    checksum: None,
+                })
             }
-            _ => Err(parse_error(resp).await?),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -141,12 +138,8 @@ impl oio::MultipartWrite for CosWriter {
         let status = resp.status();
 
         match status {
-            StatusCode::OK => {
-                resp.into_body().consume().await?;
-
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::OK => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -158,16 +151,12 @@ impl oio::MultipartWrite for CosWriter {
         match resp.status() {
             // cos returns code 204 if abort succeeds.
             // Reference: https://www.tencentcloud.com/document/product/436/7740
-            StatusCode::NO_CONTENT => {
-                resp.into_body().consume().await?;
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::NO_CONTENT => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 }
 
-#[async_trait]
 impl oio::AppendWrite for CosWriter {
     async fn offset(&self) -> Result<u64> {
         let resp = self
@@ -187,11 +176,11 @@ impl oio::AppendWrite for CosWriter {
                 Ok(content_length)
             }
             StatusCode::NOT_FOUND => Ok(0),
-            _ => Err(parse_error(resp).await?),
+            _ => Err(parse_error(resp)),
         }
     }
 
-    async fn append(&self, offset: u64, size: u64, body: AsyncBody) -> Result<()> {
+    async fn append(&self, offset: u64, size: u64, body: Buffer) -> Result<()> {
         let mut req = self
             .core
             .cos_append_object_request(&self.path, offset, size, &self.op, body)?;
@@ -204,7 +193,7 @@ impl oio::AppendWrite for CosWriter {
 
         match status {
             StatusCode::OK => Ok(()),
-            _ => Err(parse_error(resp).await?),
+            _ => Err(parse_error(resp)),
         }
     }
 }

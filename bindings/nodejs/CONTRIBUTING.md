@@ -15,7 +15,7 @@ For small or first-time contributions, we recommend the dev container method. Pr
 
 ### Using a dev container environment
 
-OpenDAL provides a pre-configured [dev container](https://containers.dev/) that could be used in [GitHub Codespaces](https://github.com/features/codespaces), [VSCode](https://code.visualstudio.com/), [JetBrains](https://www.jetbrains.com/remote-development/gateway/), [JuptyerLab](https://jupyterlab.readthedocs.io/en/stable/). Please pick up your favourite runtime environment.
+OpenDAL provides a pre-configured [dev container](https://containers.dev/) that could be used in [GitHub Codespaces](https://github.com/features/codespaces), [VSCode](https://code.visualstudio.com/), [JetBrains](https://www.jetbrains.com/remote-development/gateway/), [JupyterLab](https://jupyterlab.readthedocs.io/en/stable/). Please pick up your favourite runtime environment.
 
 The fastest way is:
 
@@ -53,6 +53,27 @@ To verify that everything is working properly, run `pnpm --version`:
 > pnpm --version
 8.11.0
 ```
+
+### Using [devbox](https://www.jetify.com/devbox/docs/)
+
+Launch Development Environment
+
+```shell
+devbox shell
+```
+
+Contains the following tools:
+
+- `node`: `18`
+- `pnpm`: `8.14.0`
+- `libiconv`: fix nix `ld` missing issue
+
+[Running Scripts](https://www.jetify.com/devbox/docs/guides/scripts/)
+
+- `devbox run format`
+- `devbox run test`
+- `devbox run build`
+- `devbox run dev`
 
 ## Build
 

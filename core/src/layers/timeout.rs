@@ -16,22 +16,13 @@
 // under the License.
 
 use std::future::Future;
-use std::io::SeekFrom;
-use std::pin::Pin;
-use std::task::Poll;
-use std::task::{ready, Context};
+use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
-use bytes::Bytes;
-
-use crate::raw::oio::ListOperation;
-use crate::raw::oio::ReadOperation;
-use crate::raw::oio::WriteOperation;
 use crate::raw::*;
 use crate::*;
 
-/// Add timeout for every operations to avoid slow or unexpected hang operations.
+/// Add timeout for every operation to avoid slow or unexpected hang operations.
 ///
 /// For example, a dead connection could hang a databases sql query. TimeoutLayer
 /// will break this connection and returns an error so users can handle it by
@@ -51,25 +42,60 @@ use crate::*;
 /// - timeout: 60 seconds
 /// - io_timeout: 10 seconds
 ///
+/// # Panics
+///
+/// TimeoutLayer will drop the future if the timeout is reached. This might cause the internal state
+/// of the future to be broken. If underlying future moves ownership into the future, it will be
+/// dropped and will neven return back.
+///
+/// For example, while using `TimeoutLayer` with `RetryLayer` at the same time, please make sure
+/// timeout layer showed up before retry layer.
+///
+/// ```no_run
+/// # use std::time::Duration;
+///
+/// # use opendal::layers::RetryLayer;
+/// # use opendal::layers::TimeoutLayer;
+/// # use opendal::services;
+/// # use opendal::Operator;
+/// # use opendal::Result;
+///
+/// # fn main() -> Result<()> {
+/// let op = Operator::new(services::Memory::default())?
+///     // This is fine, since timeout happen during retry.
+///     .layer(TimeoutLayer::new().with_io_timeout(Duration::from_nanos(1)))
+///     .layer(RetryLayer::new())
+///     // This is wrong. Since timeout layer will drop future, leaving retry layer in a bad state.
+///     .layer(TimeoutLayer::new().with_io_timeout(Duration::from_nanos(1)))
+///     .finish();
+/// Ok(())
+/// # }
+/// ```
+///
 /// # Examples
 ///
 /// The following examples will create a timeout layer with 10 seconds timeout for all non-io
 /// operations, 3 seconds timeout for all io operations.
 ///
-/// ```
-/// use anyhow::Result;
-/// use opendal::layers::TimeoutLayer;
-/// use opendal::services;
-/// use opendal::Operator;
-/// use opendal::Scheme;
-/// use std::time::Duration;
+/// ```no_run
+/// # use std::time::Duration;
 ///
-/// let _ = Operator::new(services::Memory::default())
-///     .expect("must init")
-///     .layer(TimeoutLayer::default()
-///         .with_timeout(Duration::from_secs(10))
-///         .with_io_timeout(Duration::from_secs(3)))
+/// # use opendal::layers::TimeoutLayer;
+/// # use opendal::services;
+/// # use opendal::Operator;
+/// # use opendal::Result;
+/// # use opendal::Scheme;
+///
+/// # fn main() -> Result<()> {
+/// let _ = Operator::new(services::Memory::default())?
+///     .layer(
+///         TimeoutLayer::default()
+///             .with_timeout(Duration::from_secs(10))
+///             .with_io_timeout(Duration::from_secs(3)),
+///     )
 ///     .finish();
+/// Ok(())
+/// # }
 /// ```
 ///
 /// # Implementation Notes
@@ -81,9 +107,9 @@ use crate::*;
 /// This might introduce a bit overhead for IO operations, but it's the only way to implement
 /// timeout correctly. We used to implement timeout layer in zero cost way that only stores
 /// a [`std::time::Instant`] and check the timeout by comparing the instant with current time.
-/// However, it doesn't works for all cases.
+/// However, it doesn't work for all cases.
 ///
-/// For examples, users TCP connection could be in [Busy ESTAB](https://blog.cloudflare.com/when-tcp-sockets-refuse-to-die) state. In this state, no IO event will be emit. The runtime
+/// For examples, users TCP connection could be in [Busy ESTAB](https://blog.cloudflare.com/when-tcp-sockets-refuse-to-die) state. In this state, no IO event will be emitted. The runtime
 /// will never poll our future again. From the application side, this future is hanging forever
 /// until this TCP connection is closed for reaching the linux [net.ipv4.tcp_retries2](https://man7.org/linux/man-pages/man7/tcp.7.html) times.
 #[derive(Clone)]
@@ -139,10 +165,10 @@ impl TimeoutLayer {
     }
 }
 
-impl<A: Accessor> Layer<A> for TimeoutLayer {
-    type LayeredAccessor = TimeoutAccessor<A>;
+impl<A: Access> Layer<A> for TimeoutLayer {
+    type LayeredAccess = TimeoutAccessor<A>;
 
-    fn layer(&self, inner: A) -> Self::LayeredAccessor {
+    fn layer(&self, inner: A) -> Self::LayeredAccess {
         TimeoutAccessor {
             inner,
 
@@ -153,14 +179,14 @@ impl<A: Accessor> Layer<A> for TimeoutLayer {
 }
 
 #[derive(Debug, Clone)]
-pub struct TimeoutAccessor<A: Accessor> {
+pub struct TimeoutAccessor<A: Access> {
     inner: A,
 
     timeout: Duration,
     io_timeout: Duration,
 }
 
-impl<A: Accessor> TimeoutAccessor<A> {
+impl<A: Access> TimeoutAccessor<A> {
     async fn timeout<F: Future<Output = Result<T>>, T>(&self, op: Operation, fut: F) -> Result<T> {
         tokio::time::timeout(self.timeout, fut).await.map_err(|_| {
             Error::new(ErrorKind::Unexpected, "operation timeout reached")
@@ -186,9 +212,7 @@ impl<A: Accessor> TimeoutAccessor<A> {
     }
 }
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-impl<A: Accessor> LayeredAccessor for TimeoutAccessor<A> {
+impl<A: Access> LayeredAccess for TimeoutAccessor<A> {
     type Inner = A;
     type Reader = TimeoutWrapper<A::Reader>;
     type BlockingReader = A::BlockingReader;
@@ -196,6 +220,8 @@ impl<A: Accessor> LayeredAccessor for TimeoutAccessor<A> {
     type BlockingWriter = A::BlockingWriter;
     type Lister = TimeoutWrapper<A::Lister>;
     type BlockingLister = A::BlockingLister;
+    type Deleter = TimeoutWrapper<A::Deleter>;
+    type BlockingDeleter = A::BlockingDeleter;
 
     fn inner(&self) -> &Self::Inner {
         &self.inner
@@ -206,13 +232,27 @@ impl<A: Accessor> LayeredAccessor for TimeoutAccessor<A> {
             .await
     }
 
-    async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
+    async fn read(&self, path: &str, mut args: OpRead) -> Result<(RpRead, Self::Reader)> {
+        if let Some(exec) = args.executor().cloned() {
+            args = args.with_executor(Executor::with(TimeoutExecutor::new(
+                exec.into_inner(),
+                self.io_timeout,
+            )));
+        }
+
         self.io_timeout(Operation::Read, self.inner.read(path, args))
             .await
             .map(|(rp, r)| (rp, TimeoutWrapper::new(r, self.io_timeout)))
     }
 
-    async fn write(&self, path: &str, args: OpWrite) -> Result<(RpWrite, Self::Writer)> {
+    async fn write(&self, path: &str, mut args: OpWrite) -> Result<(RpWrite, Self::Writer)> {
+        if let Some(exec) = args.executor().cloned() {
+            args = args.with_executor(Executor::with(TimeoutExecutor::new(
+                exec.into_inner(),
+                self.io_timeout,
+            )));
+        }
+
         self.io_timeout(Operation::Write, self.inner.write(path, args))
             .await
             .map(|(rp, r)| (rp, TimeoutWrapper::new(r, self.io_timeout)))
@@ -233,19 +273,16 @@ impl<A: Accessor> LayeredAccessor for TimeoutAccessor<A> {
             .await
     }
 
-    async fn delete(&self, path: &str, args: OpDelete) -> Result<RpDelete> {
-        self.timeout(Operation::Delete, self.inner.delete(path, args))
+    async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
+        self.timeout(Operation::Delete, self.inner.delete())
             .await
+            .map(|(rp, r)| (rp, TimeoutWrapper::new(r, self.io_timeout)))
     }
 
     async fn list(&self, path: &str, args: OpList) -> Result<(RpList, Self::Lister)> {
         self.io_timeout(Operation::List, self.inner.list(path, args))
             .await
             .map(|(rp, r)| (rp, TimeoutWrapper::new(r, self.io_timeout)))
-    }
-
-    async fn batch(&self, args: OpBatch) -> Result<RpBatch> {
-        self.timeout(Operation::Batch, self.inner.batch(args)).await
     }
 
     async fn presign(&self, path: &str, args: OpPresign) -> Result<RpPresign> {
@@ -264,136 +301,131 @@ impl<A: Accessor> LayeredAccessor for TimeoutAccessor<A> {
     fn blocking_list(&self, path: &str, args: OpList) -> Result<(RpList, Self::BlockingLister)> {
         self.inner.blocking_list(path, args)
     }
+
+    fn blocking_delete(&self) -> Result<(RpDelete, Self::BlockingDeleter)> {
+        self.inner.blocking_delete()
+    }
+}
+
+pub struct TimeoutExecutor {
+    exec: Arc<dyn Execute>,
+    timeout: Duration,
+}
+
+impl TimeoutExecutor {
+    pub fn new(exec: Arc<dyn Execute>, timeout: Duration) -> Self {
+        Self { exec, timeout }
+    }
+}
+
+impl Execute for TimeoutExecutor {
+    fn execute(&self, f: BoxedStaticFuture<()>) {
+        self.exec.execute(f)
+    }
+
+    fn timeout(&self) -> Option<BoxedStaticFuture<()>> {
+        Some(Box::pin(tokio::time::sleep(self.timeout)))
+    }
 }
 
 pub struct TimeoutWrapper<R> {
     inner: R,
 
     timeout: Duration,
-    sleep: Option<Pin<Box<tokio::time::Sleep>>>,
 }
 
 impl<R> TimeoutWrapper<R> {
     fn new(inner: R, timeout: Duration) -> Self {
-        Self {
-            inner,
-            timeout,
-            sleep: None,
-        }
+        Self { inner, timeout }
     }
 
     #[inline]
-    fn poll_timeout(&mut self, cx: &mut Context<'_>, op: &'static str) -> Result<()> {
-        if let Some(sleep) = self.sleep.as_mut() {
-            match sleep.as_mut().poll(cx) {
-                Poll::Pending => Ok(()),
-                Poll::Ready(_) => {
-                    self.sleep = None;
-                    Err(
-                        Error::new(ErrorKind::Unexpected, "io operation timeout reached")
-                            .with_operation(op)
-                            .with_context("io_timeout", self.timeout.as_secs_f64().to_string())
-                            .set_temporary(),
-                    )
-                }
-            }
-        } else {
-            self.sleep = Some(Box::pin(tokio::time::sleep(self.timeout)));
-            Ok(())
-        }
+    async fn io_timeout<F: Future<Output = Result<T>>, T>(
+        timeout: Duration,
+        op: &'static str,
+        fut: F,
+    ) -> Result<T> {
+        tokio::time::timeout(timeout, fut).await.map_err(|_| {
+            Error::new(ErrorKind::Unexpected, "io operation timeout reached")
+                .with_operation(op)
+                .with_context("timeout", timeout.as_secs_f64().to_string())
+                .set_temporary()
+        })?
     }
 }
 
 impl<R: oio::Read> oio::Read for TimeoutWrapper<R> {
-    fn poll_read(&mut self, cx: &mut Context<'_>, buf: &mut [u8]) -> Poll<Result<usize>> {
-        self.poll_timeout(cx, ReadOperation::Read.into_static())?;
-
-        let v = ready!(self.inner.poll_read(cx, buf));
-        self.sleep = None;
-        Poll::Ready(v)
-    }
-
-    fn poll_seek(&mut self, cx: &mut Context<'_>, pos: SeekFrom) -> Poll<Result<u64>> {
-        self.poll_timeout(cx, ReadOperation::Seek.into_static())?;
-
-        let v = ready!(self.inner.poll_seek(cx, pos));
-        self.sleep = None;
-        Poll::Ready(v)
-    }
-
-    fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Option<Result<Bytes>>> {
-        self.poll_timeout(cx, ReadOperation::Next.into_static())?;
-
-        let v = ready!(self.inner.poll_next(cx));
-        self.sleep = None;
-        Poll::Ready(v)
+    async fn read(&mut self) -> Result<Buffer> {
+        let fut = self.inner.read();
+        Self::io_timeout(self.timeout, Operation::ReaderRead.into_static(), fut).await
     }
 }
 
 impl<R: oio::Write> oio::Write for TimeoutWrapper<R> {
-    fn poll_write(&mut self, cx: &mut Context<'_>, bs: &dyn oio::WriteBuf) -> Poll<Result<usize>> {
-        self.poll_timeout(cx, WriteOperation::Write.into_static())?;
-
-        let v = ready!(self.inner.poll_write(cx, bs));
-        self.sleep = None;
-        Poll::Ready(v)
+    async fn write(&mut self, bs: Buffer) -> Result<()> {
+        let fut = self.inner.write(bs);
+        Self::io_timeout(self.timeout, Operation::WriterWrite.into_static(), fut).await
     }
 
-    fn poll_close(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
-        self.poll_timeout(cx, WriteOperation::Close.into_static())?;
-
-        let v = ready!(self.inner.poll_close(cx));
-        self.sleep = None;
-        Poll::Ready(v)
+    async fn close(&mut self) -> Result<()> {
+        let fut = self.inner.close();
+        Self::io_timeout(self.timeout, Operation::WriterClose.into_static(), fut).await
     }
 
-    fn poll_abort(&mut self, cx: &mut Context<'_>) -> Poll<Result<()>> {
-        self.poll_timeout(cx, WriteOperation::Abort.into_static())?;
-
-        let v = ready!(self.inner.poll_abort(cx));
-        self.sleep = None;
-        Poll::Ready(v)
+    async fn abort(&mut self) -> Result<()> {
+        let fut = self.inner.abort();
+        Self::io_timeout(self.timeout, Operation::WriterAbort.into_static(), fut).await
     }
 }
 
 impl<R: oio::List> oio::List for TimeoutWrapper<R> {
-    fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<oio::Entry>>> {
-        self.poll_timeout(cx, ListOperation::Next.into_static())?;
+    async fn next(&mut self) -> Result<Option<oio::Entry>> {
+        let fut = self.inner.next();
+        Self::io_timeout(self.timeout, Operation::ListerNext.into_static(), fut).await
+    }
+}
 
-        let v = ready!(self.inner.poll_next(cx));
-        self.sleep = None;
-        Poll::Ready(v)
+impl<R: oio::Delete> oio::Delete for TimeoutWrapper<R> {
+    fn delete(&mut self, path: &str, args: OpDelete) -> Result<()> {
+        self.inner.delete(path, args)
+    }
+
+    async fn flush(&mut self) -> Result<usize> {
+        let fut = self.inner.flush();
+        Self::io_timeout(self.timeout, Operation::DeleterFlush.into_static(), fut).await
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::layers::{TimeoutLayer, TypeEraseLayer};
-    use crate::raw::oio::ReadExt;
+    use std::future::pending;
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use tokio::time::sleep;
+    use tokio::time::timeout;
+
+    use crate::layers::TimeoutLayer;
+    use crate::layers::TypeEraseLayer;
     use crate::raw::*;
     use crate::*;
-    use async_trait::async_trait;
-    use bytes::Bytes;
-    use std::io::SeekFrom;
-    use std::sync::Arc;
-    use std::task::{Context, Poll};
-    use std::time::Duration;
-    use tokio::time::{sleep, timeout};
 
     #[derive(Debug, Clone, Default)]
     struct MockService;
 
-    #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-    #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-    impl Accessor for MockService {
+    impl Access for MockService {
         type Reader = MockReader;
         type Writer = ();
-        type Lister = ();
+        type Lister = MockLister;
         type BlockingReader = ();
         type BlockingWriter = ();
         type BlockingLister = ();
+        type Deleter = ();
+        type BlockingDeleter = ();
 
-        fn info(&self) -> AccessorInfo {
+        fn info(&self) -> Arc<AccessorInfo> {
             let mut am = AccessorInfo::default();
             am.set_native_capability(Capability {
                 read: true,
@@ -401,7 +433,7 @@ mod tests {
                 ..Default::default()
             });
 
-            am
+            am.into()
         }
 
         /// This function will build a reader that always return pending.
@@ -410,10 +442,14 @@ mod tests {
         }
 
         /// This function will never return.
-        async fn delete(&self, _: &str, _: OpDelete) -> Result<RpDelete> {
+        async fn delete(&self) -> Result<(RpDelete, Self::Deleter)> {
             sleep(Duration::from_secs(u64::MAX)).await;
 
-            Ok(RpDelete::default())
+            Ok((RpDelete::default(), ()))
+        }
+
+        async fn list(&self, _: &str, _: OpList) -> Result<(RpList, Self::Lister)> {
+            Ok((RpList::default(), MockLister))
         }
     }
 
@@ -421,22 +457,23 @@ mod tests {
     struct MockReader;
 
     impl oio::Read for MockReader {
-        fn poll_read(&mut self, _: &mut Context<'_>, _: &mut [u8]) -> Poll<Result<usize>> {
-            Poll::Pending
+        fn read(&mut self) -> impl Future<Output = Result<Buffer>> {
+            pending()
         }
+    }
 
-        fn poll_seek(&mut self, _: &mut Context<'_>, _: SeekFrom) -> Poll<Result<u64>> {
-            Poll::Pending
-        }
+    #[derive(Debug, Clone, Default)]
+    struct MockLister;
 
-        fn poll_next(&mut self, _: &mut Context<'_>) -> Poll<Option<Result<Bytes>>> {
-            Poll::Pending
+    impl oio::List for MockLister {
+        fn next(&mut self) -> impl Future<Output = Result<Option<oio::Entry>>> {
+            pending()
         }
     }
 
     #[tokio::test]
     async fn test_operation_timeout() {
-        let acc = Arc::new(TypeEraseLayer.layer(MockService)) as FusedAccessor;
+        let acc = Arc::new(TypeEraseLayer.layer(MockService)) as Accessor;
         let op = Operator::from_inner(acc)
             .layer(TimeoutLayer::new().with_timeout(Duration::from_secs(1)));
 
@@ -455,22 +492,55 @@ mod tests {
 
     #[tokio::test]
     async fn test_io_timeout() {
-        let acc = Arc::new(TypeEraseLayer.layer(MockService)) as FusedAccessor;
+        let acc = Arc::new(TypeEraseLayer.layer(MockService)) as Accessor;
         let op = Operator::from_inner(acc)
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_secs(1)));
 
-        let fut = async {
-            let mut reader = op.reader("test").await.unwrap();
+        let reader = op.reader("test").await.unwrap();
 
-            let res = reader.read(&mut [0; 4]).await;
-            assert!(res.is_err());
-            let err = res.unwrap_err();
-            assert_eq!(err.kind(), ErrorKind::Unexpected);
-            assert!(err.to_string().contains("timeout"))
-        };
+        let res = reader.read(0..4).await;
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Unexpected);
+        assert!(err.to_string().contains("timeout"))
+    }
 
-        timeout(Duration::from_secs(2), fut)
+    #[tokio::test]
+    async fn test_list_timeout() {
+        let acc = Arc::new(TypeEraseLayer.layer(MockService)) as Accessor;
+        let op = Operator::from_inner(acc).layer(
+            TimeoutLayer::new()
+                .with_timeout(Duration::from_secs(1))
+                .with_io_timeout(Duration::from_secs(1)),
+        );
+
+        let mut lister = op.lister("test").await.unwrap();
+
+        let res = lister.next().await.unwrap();
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Unexpected);
+        assert!(err.to_string().contains("timeout"))
+    }
+
+    #[tokio::test]
+    async fn test_list_timeout_raw() {
+        use oio::List;
+
+        let acc = MockService;
+        let timeout_layer = TimeoutLayer::new()
+            .with_timeout(Duration::from_secs(1))
+            .with_io_timeout(Duration::from_secs(1));
+        let timeout_acc = timeout_layer.layer(acc);
+
+        let (_, mut lister) = Access::list(&timeout_acc, "test", OpList::default())
             .await
-            .expect("this test should not exceed 2 seconds")
+            .unwrap();
+
+        let res = lister.next().await;
+        assert!(res.is_err());
+        let err = res.unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::Unexpected);
+        assert!(err.to_string().contains("timeout"));
     }
 }

@@ -3,13 +3,12 @@ title: "Apache OpenDAL™ is now Graduated"
 date: 2024-01-22
 slug: apache-opendal-graduated
 tags: [announcement]
-authors:
-  - name: Xuanwo
-    url: https://github.com/Xuanwo
-    image_url: https://github.com/Xuanwo.png
+authors: xuanwo
 ---
 
 Hello, everyone! I'm happy to announce that [Apache OpenDAL™](https://opendal.apache.org/) has graduated from the [Apache Incubator](https://incubator.apache.org/) to become a Top-Level Project of [the Apache Software Foundation](https://apache.org/).
+
+<!--truncate-->
 
 ## What's Apache OpenDAL?
 
@@ -115,7 +114,7 @@ We plan to:
 
 ### More Useful Documents
 
-OpenDAL have good docs for it's rust core, but not for other language bindings.
+OpenDAL have good docs for its rust core, but not for other language bindings.
 
 The lack of comprehensive documentation makes OpenDAL challenging for users to operate in Java or Python. Without user feedback, the community is unable to enhance this documentation, leading to a detrimental cycle that must be broken.
 
@@ -126,7 +125,7 @@ We plan to:
 - Introduce code generation to automatically create documentation for the service builder due to its numerous configurations.
 - Add more API Docs and examples for other language bindings.
 
-OpenDAL have good docs for it's public API, but not for its internal design.
+OpenDAL have good docs for its public API, but not for its internal design.
 
 OpenDAL is proud of its elegant design, but it is not well documented. This makes it difficult for new contributors to understand the codebase and make contributions.
 

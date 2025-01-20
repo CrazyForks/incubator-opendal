@@ -17,7 +17,6 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use http::StatusCode;
 
 use super::core::*;
@@ -44,9 +43,8 @@ impl OssWriter {
     }
 }
 
-#[async_trait]
 impl oio::MultipartWrite for OssWriter {
-    async fn write_once(&self, size: u64, body: AsyncBody) -> Result<()> {
+    async fn write_once(&self, size: u64, body: Buffer) -> Result<()> {
         let mut req =
             self.core
                 .oss_put_object_request(&self.path, Some(size), &self.op, body, false)?;
@@ -58,11 +56,8 @@ impl oio::MultipartWrite for OssWriter {
         let status = resp.status();
 
         match status {
-            StatusCode::CREATED | StatusCode::OK => {
-                resp.into_body().consume().await?;
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::CREATED | StatusCode::OK => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -82,7 +77,7 @@ impl oio::MultipartWrite for OssWriter {
 
         match status {
             StatusCode::OK => {
-                let bs = resp.into_body().bytes().await?;
+                let bs = resp.into_body();
 
                 let result: InitiateMultipartUploadResult =
                     quick_xml::de::from_reader(bytes::Buf::reader(bs))
@@ -90,7 +85,7 @@ impl oio::MultipartWrite for OssWriter {
 
                 Ok(result.upload_id)
             }
-            _ => Err(parse_error(resp).await?),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -99,7 +94,7 @@ impl oio::MultipartWrite for OssWriter {
         upload_id: &str,
         part_number: usize,
         size: u64,
-        body: AsyncBody,
+        body: Buffer,
     ) -> Result<oio::MultipartPart> {
         // OSS requires part number must between [1..=10000]
         let part_number = part_number + 1;
@@ -122,11 +117,13 @@ impl oio::MultipartWrite for OssWriter {
                     })?
                     .to_string();
 
-                resp.into_body().consume().await?;
-
-                Ok(oio::MultipartPart { part_number, etag })
+                Ok(oio::MultipartPart {
+                    part_number,
+                    etag,
+                    checksum: None,
+                })
             }
-            _ => Err(parse_error(resp).await?),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -147,12 +144,8 @@ impl oio::MultipartWrite for OssWriter {
         let status = resp.status();
 
         match status {
-            StatusCode::OK => {
-                resp.into_body().consume().await?;
-
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::OK => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 
@@ -163,19 +156,18 @@ impl oio::MultipartWrite for OssWriter {
             .await?;
         match resp.status() {
             // OSS returns code 204 if abort succeeds.
-            StatusCode::NO_CONTENT => {
-                resp.into_body().consume().await?;
-                Ok(())
-            }
-            _ => Err(parse_error(resp).await?),
+            StatusCode::NO_CONTENT => Ok(()),
+            _ => Err(parse_error(resp)),
         }
     }
 }
 
-#[async_trait]
 impl oio::AppendWrite for OssWriter {
     async fn offset(&self) -> Result<u64> {
-        let resp = self.core.oss_head_object(&self.path, None, None).await?;
+        let resp = self
+            .core
+            .oss_head_object(&self.path, &OpStat::new())
+            .await?;
 
         let status = resp.status();
         match status {
@@ -189,11 +181,11 @@ impl oio::AppendWrite for OssWriter {
                 Ok(content_length)
             }
             StatusCode::NOT_FOUND => Ok(0),
-            _ => Err(parse_error(resp).await?),
+            _ => Err(parse_error(resp)),
         }
     }
 
-    async fn append(&self, offset: u64, size: u64, body: AsyncBody) -> Result<()> {
+    async fn append(&self, offset: u64, size: u64, body: Buffer) -> Result<()> {
         let mut req = self
             .core
             .oss_append_object_request(&self.path, offset, size, &self.op, body)?;
@@ -206,7 +198,7 @@ impl oio::AppendWrite for OssWriter {
 
         match status {
             StatusCode::OK => Ok(()),
-            _ => Err(parse_error(resp).await?),
+            _ => Err(parse_error(resp)),
         }
     }
 }
