@@ -25,7 +25,7 @@ homepage = "https://opendal.apache.org/"
 license = "Apache-2.0"
 repository = "https://github.com/apache/opendal"
 rust-version = "1.80"
-version = "0.45.17"
+version = "0.45.19"
 
 [features]
 default = [
@@ -163,6 +163,7 @@ futures = "0.3.28"
 # this crate won't be published, we always use the local version
 opendal = { version = ">=0", path = "../../core", features = [
   "layers-blocking",
+  "layers-mime-guess"
 ] }
 pyo3 = { version = "0.24.1", features = ["generate-import-lib", "chrono"] }
 pyo3-async-runtimes = { version = "0.24.0", features = ["tokio-runtime"] }
@@ -171,6 +172,7 @@ tokio = "1"
 [target.'cfg(unix)'.dependencies.opendal]
 features = [
   "layers-blocking",
+  "layers-mime-guess",
   # Depend on "openssh" which depends on "tokio-pipe" that is unavailable on Windows.
   "services-sftp",
 ]

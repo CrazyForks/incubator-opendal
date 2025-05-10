@@ -124,6 +124,12 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! # Useful Links
+//!
+//! - [Concept][crate::docs::concepts]
+//! - [Internals][crate::docs::internals]
+//! - [Performance Guide][crate::docs::performance]
 
 // Make sure all our public APIs have docs.
 #![warn(missing_docs)]
@@ -148,6 +154,7 @@ mod tests {
     ///
     /// We assert our public structs here to make sure we don't introduce
     /// unexpected struct/enum size change.
+    #[cfg(target_pointer_width = "64")]
     #[test]
     fn assert_size() {
         assert_eq!(16, size_of::<Operator>());

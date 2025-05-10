@@ -15,32 +15,18 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use bytes::Bytes;
-use rand::prelude::ThreadRng;
-use rand::RngCore;
+//! OpenDAL Performance Guide
+//!
+//! OpenDAL is designed in a zero-cost abstraction way, which means that
+//! users won't pay for the abstraction cost if they don't use it. But this
+//! can also means that users can't maximize the performance of OpenDAL
+//! if they don't know how to use it.
+//!
+//! This document will introduce some tips to improve the performance of
+//! OpenDAL.
 
-pub struct RepeatedBytes {
-    pub bytes: Bytes,
-    pub index: usize,
-    pub count: usize,
-}
+#[doc = include_str!("concurrent_write.md")]
+pub mod concurrent_write {}
 
-impl Iterator for RepeatedBytes {
-    type Item = Bytes;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index < self.count {
-            self.index += 1;
-            Some(self.bytes.clone())
-        } else {
-            None
-        }
-    }
-}
-
-pub fn gen_bytes(rng: &mut ThreadRng, size: usize) -> Bytes {
-    let mut content = vec![0; size];
-    rng.fill_bytes(&mut content);
-
-    content.into()
-}
+#[doc = include_str!("http_optimization.md")]
+pub mod http_optimization {}
