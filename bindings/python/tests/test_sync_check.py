@@ -15,17 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
-releases-note/build:
-  - '^build'
-releases-note/chore:
-  - '^chore'
-releases-note/ci:
-  - '^ci'
-releases-note/docs:
-  - '^doc'
-releases-note/feat:
-  - '^feat'
-releases-note/fix:
-  - '^fix'
-releases-note/refactor:
-  - '^refactor'
+import pytest
+
+
+@pytest.mark.need_capability("list")
+def test_sync_check(service_name, operator, async_operator):
+    operator.list("/")
+    operator.check()

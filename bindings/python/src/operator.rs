@@ -212,9 +212,14 @@ impl Operator {
     }
 
     /// List current dir path.
-    pub fn list(&self, path: PathBuf) -> PyResult<BlockingLister> {
+    #[pyo3(signature = (path, *, start_after=None))]
+    pub fn list(&self, path: PathBuf, start_after: Option<String>) -> PyResult<BlockingLister> {
         let path = path.to_string_lossy().to_string();
-        let l = self.core.lister(&path).map_err(format_pyerr)?;
+        let mut builder = self.core.lister_with(&path);
+        if let Some(start_after) = start_after {
+            builder = builder.start_after(&start_after);
+        }
+        let l = builder.call().map_err(format_pyerr)?;
         Ok(BlockingLister::new(l))
     }
 
@@ -234,6 +239,11 @@ impl Operator {
         Ok(capability::Capability::new(
             self.core.info().full_capability(),
         ))
+    }
+
+    /// Check if this operator can work correctly.
+    pub fn check(&self) -> PyResult<()> {
+        self.core.check().map_err(format_pyerr)
     }
 
     pub fn to_async_operator(&self) -> PyResult<AsyncOperator> {
@@ -443,6 +453,12 @@ impl AsyncOperator {
         })
     }
 
+    /// Check if this operator can work correctly.
+    pub fn check<'p>(&'p self, py: Python<'p>) -> PyResult<Bound<'p, PyAny>> {
+        let this = self.core.clone();
+        future_into_py(py, async move { this.check().await.map_err(format_pyerr) })
+    }
+
     /// Create a dir at given path.
     ///
     /// # Notes
@@ -492,11 +508,21 @@ impl AsyncOperator {
     }
 
     /// List current dir path.
-    pub fn list<'p>(&'p self, py: Python<'p>, path: PathBuf) -> PyResult<Bound<'p, PyAny>> {
+    #[pyo3(signature = (path, *, start_after=None))]
+    pub fn list<'p>(
+        &'p self,
+        py: Python<'p>,
+        path: PathBuf,
+        start_after: Option<String>,
+    ) -> PyResult<Bound<'p, PyAny>> {
         let this = self.core.clone();
         let path = path.to_string_lossy().to_string();
         future_into_py(py, async move {
-            let lister = this.lister(&path).await.map_err(format_pyerr)?;
+            let mut builder = this.lister_with(&path);
+            if let Some(start_after) = start_after {
+                builder = builder.start_after(&start_after);
+            }
+            let lister = builder.await.map_err(format_pyerr)?;
             let pylister = Python::with_gil(|py| AsyncLister::new(lister).into_py_any(py))?;
 
             Ok(pylister)
@@ -508,11 +534,8 @@ impl AsyncOperator {
         let this = self.core.clone();
         let path = path.to_string_lossy().to_string();
         future_into_py(py, async move {
-            let lister = this
-                .lister_with(&path)
-                .recursive(true)
-                .await
-                .map_err(format_pyerr)?;
+            let builder = this.lister_with(&path).recursive(true);
+            let lister = builder.await.map_err(format_pyerr)?;
             let pylister: PyObject =
                 Python::with_gil(|py| AsyncLister::new(lister).into_py_any(py))?;
             Ok(pylister)
