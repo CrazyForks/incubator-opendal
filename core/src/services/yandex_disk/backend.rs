@@ -20,8 +20,6 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use bytes::Buf;
-use http::header;
-use http::Request;
 use http::Response;
 use http::StatusCode;
 use log::debug;
@@ -187,10 +185,6 @@ impl Access for YandexDiskBackend {
     type Writer = YandexDiskWriters;
     type Lister = oio::PageLister<YandexDiskLister>;
     type Deleter = oio::OneShotDeleter<YandexDiskDeleter>;
-    type BlockingReader = ();
-    type BlockingWriter = ();
-    type BlockingLister = ();
-    type BlockingDeleter = ();
 
     fn info(&self) -> Arc<AccessorInfo> {
         self.core.info.clone()
@@ -229,14 +223,7 @@ impl Access for YandexDiskBackend {
     }
 
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
-        // TODO: move this out of reader.
-        let download_url = self.core.get_download_url(path).await?;
-
-        let req = Request::get(download_url)
-            .header(header::RANGE, args.range().to_header())
-            .body(Buffer::new())
-            .map_err(new_request_build_error)?;
-        let resp = self.core.info.http_client().fetch(req).await?;
+        let resp = self.core.download(path, args.range()).await?;
 
         let status = resp.status();
         match status {

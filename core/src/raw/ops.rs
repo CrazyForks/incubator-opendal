@@ -19,7 +19,7 @@
 //!
 //! By using ops, users can add more context for operation.
 
-use crate::raw::*;
+use crate::{options, raw::*};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::time::Duration;
@@ -65,6 +65,14 @@ impl OpDelete {
     }
 }
 
+impl From<options::DeleteOptions> for OpDelete {
+    fn from(value: options::DeleteOptions) -> Self {
+        Self {
+            version: value.version,
+        }
+    }
+}
+
 /// Args for `delete` operation.
 ///
 /// The path must be normalized.
@@ -79,7 +87,7 @@ impl OpDeleter {
 }
 
 /// Args for `list` operation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OpList {
     /// The limit passed to underlying service to specify the max results
     /// that could return per-request.
@@ -96,13 +104,6 @@ pub struct OpList {
     ///
     /// Default to `false`.
     recursive: bool,
-    /// The concurrent of stat operations inside list operation.
-    /// Users could use this to control the number of concurrent stat operation when metadata is unknown.
-    ///
-    /// - If this is set to <= 1, the list operation will be sequential.
-    /// - If this is set to > 1, the list operation will be concurrent,
-    ///   and the maximum number of concurrent operations will be determined by this value.
-    concurrent: usize,
     /// The version is used to control whether the object versions should be returned.
     ///
     /// - If `false`, list operation will not return with object versions
@@ -119,19 +120,6 @@ pub struct OpList {
     ///
     /// Default to `false`
     deleted: bool,
-}
-
-impl Default for OpList {
-    fn default() -> Self {
-        OpList {
-            limit: None,
-            start_after: None,
-            recursive: false,
-            concurrent: 1,
-            versions: false,
-            deleted: false,
-        }
-    }
 }
 
 impl OpList {
@@ -181,14 +169,16 @@ impl OpList {
     /// Change the concurrent of this list operation.
     ///
     /// The default concurrent is 1.
-    pub fn with_concurrent(mut self, concurrent: usize) -> Self {
-        self.concurrent = concurrent;
+    #[deprecated(since = "0.53.2", note = "concurrent in list is no-op")]
+    pub fn with_concurrent(self, concurrent: usize) -> Self {
+        let _ = concurrent;
         self
     }
 
     /// Get the concurrent of list operation.
+    #[deprecated(since = "0.53.2", note = "concurrent in list is no-op")]
     pub fn concurrent(&self) -> usize {
-        self.concurrent
+        0
     }
 
     /// Change the version of this list operation
@@ -224,6 +214,18 @@ impl OpList {
     /// Get the deleted of this list operation
     pub fn deleted(&self) -> bool {
         self.deleted
+    }
+}
+
+impl From<options::ListOptions> for OpList {
+    fn from(value: options::ListOptions) -> Self {
+        Self {
+            limit: value.limit,
+            start_after: value.start_after,
+            recursive: value.recursive,
+            versions: value.versions,
+            deleted: value.deleted,
+        }
     }
 }
 
@@ -487,6 +489,54 @@ impl OpReader {
     }
 }
 
+impl From<options::ReadOptions> for (OpRead, OpReader) {
+    fn from(value: options::ReadOptions) -> Self {
+        (
+            OpRead {
+                range: value.range,
+                if_match: value.if_match,
+                if_none_match: value.if_none_match,
+                if_modified_since: value.if_modified_since,
+                if_unmodified_since: value.if_unmodified_since,
+                override_content_type: value.override_content_type,
+                override_cache_control: value.override_cache_control,
+                override_content_disposition: value.override_content_disposition,
+                version: value.version,
+            },
+            OpReader {
+                // Ensure concurrent is at least 1
+                concurrent: value.concurrent.max(1),
+                chunk: value.chunk,
+                gap: value.gap,
+            },
+        )
+    }
+}
+
+impl From<options::ReaderOptions> for (OpRead, OpReader) {
+    fn from(value: options::ReaderOptions) -> Self {
+        (
+            OpRead {
+                range: BytesRange::default(),
+                if_match: value.if_match,
+                if_none_match: value.if_none_match,
+                if_modified_since: value.if_modified_since,
+                if_unmodified_since: value.if_unmodified_since,
+                override_content_type: None,
+                override_cache_control: None,
+                override_content_disposition: None,
+                version: value.version,
+            },
+            OpReader {
+                // Ensure concurrent is at least 1
+                concurrent: value.concurrent.max(1),
+                chunk: value.chunk,
+                gap: value.gap,
+            },
+        )
+    }
+}
+
 /// Args for `stat` operation.
 #[derive(Debug, Clone, Default)]
 pub struct OpStat {
@@ -593,6 +643,21 @@ impl OpStat {
     /// Get version from option
     pub fn version(&self) -> Option<&str> {
         self.version.as_deref()
+    }
+}
+
+impl From<options::StatOptions> for OpStat {
+    fn from(value: options::StatOptions) -> Self {
+        Self {
+            if_match: value.if_match,
+            if_none_match: value.if_none_match,
+            if_modified_since: value.if_modified_since,
+            if_unmodified_since: value.if_unmodified_since,
+            override_content_type: value.override_content_type,
+            override_cache_control: value.override_cache_control,
+            override_content_disposition: value.override_content_disposition,
+            version: value.version,
+        }
     }
 }
 
@@ -769,6 +834,27 @@ impl OpWriter {
     pub fn with_chunk(mut self, chunk: usize) -> Self {
         self.chunk = Some(chunk);
         self
+    }
+}
+
+impl From<options::WriteOptions> for (OpWrite, OpWriter) {
+    fn from(value: options::WriteOptions) -> Self {
+        (
+            OpWrite {
+                append: value.append,
+                // Ensure concurrent is at least 1
+                concurrent: value.concurrent.max(1),
+                content_type: value.content_type,
+                content_disposition: value.content_disposition,
+                content_encoding: value.content_encoding,
+                cache_control: value.cache_control,
+                if_match: value.if_match,
+                if_none_match: value.if_none_match,
+                if_not_exists: value.if_not_exists,
+                user_metadata: value.user_metadata,
+            },
+            OpWriter { chunk: value.chunk },
+        )
     }
 }
 

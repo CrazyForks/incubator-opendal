@@ -27,6 +27,7 @@ use reqsign::AzureStorageLoader;
 use reqsign::AzureStorageSigner;
 
 use super::core::AzdlsCore;
+use super::core::DIRECTORY;
 use super::delete::AzdlsDeleter;
 use super::error::parse_error;
 use super::lister::AzdlsLister;
@@ -138,6 +139,67 @@ impl AzdlsBuilder {
         self
     }
 
+    /// Set client_secret of this backend.
+    ///
+    /// - If client_secret is set, we will take user's input first.
+    /// - If not, we will try to load it from environment.
+    /// - required for client_credentials authentication
+    pub fn client_secret(mut self, client_secret: &str) -> Self {
+        if !client_secret.is_empty() {
+            self.config.client_secret = Some(client_secret.to_string());
+        }
+
+        self
+    }
+
+    /// Set tenant_id of this backend.
+    ///
+    /// - If tenant_id is set, we will take user's input first.
+    /// - If not, we will try to load it from environment.
+    /// - required for client_credentials authentication
+    pub fn tenant_id(mut self, tenant_id: &str) -> Self {
+        if !tenant_id.is_empty() {
+            self.config.tenant_id = Some(tenant_id.to_string());
+        }
+
+        self
+    }
+
+    /// Set client_id of this backend.
+    ///
+    /// - If client_id is set, we will take user's input first.
+    /// - If not, we will try to load it from environment.
+    /// - required for client_credentials authentication
+    pub fn client_id(mut self, client_id: &str) -> Self {
+        if !client_id.is_empty() {
+            self.config.client_id = Some(client_id.to_string());
+        }
+
+        self
+    }
+
+    /// Set the sas_token of this backend.
+    pub fn sas_token(mut self, sas_token: &str) -> Self {
+        if !sas_token.is_empty() {
+            self.config.sas_token = Some(sas_token.to_string());
+        }
+
+        self
+    }
+
+    /// Set authority_host of this backend.
+    ///
+    /// - If authority_host is set, we will take user's input first.
+    /// - If not, we will try to load it from environment.
+    /// - default value: `https://login.microsoftonline.com`
+    pub fn authority_host(mut self, authority_host: &str) -> Self {
+        if !authority_host.is_empty() {
+            self.config.authority_host = Some(authority_host.to_string());
+        }
+
+        self
+    }
+
     /// Specify the http client that used by this service.
     ///
     /// # Notes
@@ -172,7 +234,7 @@ impl Builder for AzdlsBuilder {
         debug!("backend use filesystem {}", &filesystem);
 
         let endpoint = match &self.config.endpoint {
-            Some(endpoint) => Ok(endpoint.clone()),
+            Some(endpoint) => Ok(endpoint.clone().trim_end_matches('/').to_string()),
             None => Err(Error::new(ErrorKind::ConfigInvalid, "endpoint is empty")
                 .with_operation("Builder::build")
                 .with_context("service", Scheme::Azdls)),
@@ -186,7 +248,11 @@ impl Builder for AzdlsBuilder {
                 .clone()
                 .or_else(|| infer_storage_name_from_endpoint(endpoint.as_str())),
             account_key: self.config.account_key.clone(),
-            sas_token: None,
+            sas_token: self.config.sas_token,
+            client_id: self.config.client_id.clone(),
+            client_secret: self.config.client_secret.clone(),
+            tenant_id: self.config.tenant_id.clone(),
+            authority_host: self.config.authority_host.clone(),
             ..Default::default()
         };
 
@@ -261,29 +327,18 @@ impl Access for AzdlsBackend {
     type Writer = AzdlsWriters;
     type Lister = oio::PageLister<AzdlsLister>;
     type Deleter = oio::OneShotDeleter<AzdlsDeleter>;
-    type BlockingReader = ();
-    type BlockingWriter = ();
-    type BlockingLister = ();
-    type BlockingDeleter = ();
 
     fn info(&self) -> Arc<AccessorInfo> {
         self.core.info.clone()
     }
 
     async fn create_dir(&self, path: &str, _: OpCreateDir) -> Result<RpCreateDir> {
-        let mut req = self.core.azdls_create_request(
-            path,
-            "directory",
-            &OpWrite::default(),
-            Buffer::new(),
-        )?;
-
-        self.core.sign(&mut req).await?;
-
-        let resp = self.core.send(req).await?;
+        let resp = self
+            .core
+            .azdls_create(path, DIRECTORY, &OpWrite::default())
+            .await?;
 
         let status = resp.status();
-
         match status {
             StatusCode::CREATED | StatusCode::OK => Ok(RpCreateDir::default()),
             _ => Err(parse_error(resp)),
@@ -292,48 +347,13 @@ impl Access for AzdlsBackend {
 
     async fn stat(&self, path: &str, _: OpStat) -> Result<RpStat> {
         // Stat root always returns a DIR.
+        // TODO: include metadata for the root (#4746)
         if path == "/" {
             return Ok(RpStat::new(Metadata::new(EntryMode::DIR)));
         }
 
-        let resp = self.core.azdls_get_properties(path).await?;
-
-        if resp.status() != StatusCode::OK {
-            return Err(parse_error(resp));
-        }
-
-        let mut meta = parse_into_metadata(path, resp.headers())?;
-        let resource = resp
-            .headers()
-            .get("x-ms-resource-type")
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::Unexpected,
-                    "azdls should return x-ms-resource-type header, but it's missing",
-                )
-            })?
-            .to_str()
-            .map_err(|err| {
-                Error::new(
-                    ErrorKind::Unexpected,
-                    "azdls should return x-ms-resource-type header, but it's not a valid string",
-                )
-                .set_source(err)
-            })?;
-
-        meta = match resource {
-            "file" => meta.with_mode(EntryMode::FILE),
-            "directory" => meta.with_mode(EntryMode::DIR),
-            v => {
-                return Err(Error::new(
-                    ErrorKind::Unexpected,
-                    "azdls returns not supported x-ms-resource-type",
-                )
-                .with_context("resource", v))
-            }
-        };
-
-        Ok(RpStat::new(meta))
+        let metadata = self.core.azdls_stat_metadata(path).await?;
+        Ok(RpStat::new(metadata))
     }
 
     async fn read(&self, path: &str, args: OpRead) -> Result<(RpRead, Self::Reader)> {
@@ -407,10 +427,7 @@ fn infer_storage_name_from_endpoint(endpoint: &str) -> Option<String> {
         .trim_end_matches('/')
         .to_lowercase();
 
-    if KNOWN_AZDLS_ENDPOINT_SUFFIX
-        .iter()
-        .any(|s| *s == endpoint_suffix.as_str())
-    {
+    if KNOWN_AZDLS_ENDPOINT_SUFFIX.contains(&endpoint_suffix.as_str()) {
         storage_name.map(|s| s.to_string())
     } else {
         None

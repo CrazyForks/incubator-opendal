@@ -225,7 +225,10 @@ impl AzblobCore {
             );
         }
 
-        let req = req.body(Buffer::new()).map_err(new_request_build_error)?;
+        let req = req
+            .extension(Operation::Read)
+            .body(Buffer::new())
+            .map_err(new_request_build_error)?;
 
         Ok(req)
     }
@@ -288,10 +291,25 @@ impl AzblobCore {
             }
         }
 
-        // Set body
-        let req = req.body(body).map_err(new_request_build_error)?;
+        let req = req
+            .extension(Operation::Write)
+            .body(body)
+            .map_err(new_request_build_error)?;
 
         Ok(req)
+    }
+
+    pub async fn azblob_put_blob(
+        &self,
+        path: &str,
+        size: Option<u64>,
+        args: &OpWrite,
+        body: Buffer,
+    ) -> Result<Response<Buffer>> {
+        let mut req = self.azblob_put_blob_request(path, size, args, body)?;
+
+        self.sign(&mut req).await?;
+        self.send(req).await
     }
 
     /// For appendable object, it could be created by `put` an empty blob
@@ -311,7 +329,7 @@ impl AzblobCore {
     /// # Reference
     ///
     /// https://learn.microsoft.com/en-us/rest/api/storageservices/put-blob
-    pub fn azblob_init_appendable_blob_request(
+    fn azblob_init_appendable_blob_request(
         &self,
         path: &str,
         args: &OpWrite,
@@ -337,9 +355,23 @@ impl AzblobCore {
             req = req.header(constants::X_MS_BLOB_CACHE_CONTROL, cache_control);
         }
 
-        let req = req.body(Buffer::new()).map_err(new_request_build_error)?;
+        let req = req
+            .extension(Operation::Write)
+            .body(Buffer::new())
+            .map_err(new_request_build_error)?;
 
         Ok(req)
+    }
+
+    pub async fn azblob_init_appendable_blob(
+        &self,
+        path: &str,
+        args: &OpWrite,
+    ) -> Result<Response<Buffer>> {
+        let mut req = self.azblob_init_appendable_blob_request(path, args)?;
+
+        self.sign(&mut req).await?;
+        self.send(req).await
     }
 
     /// Append content to an appendable blob.
@@ -353,7 +385,7 @@ impl AzblobCore {
     /// # Reference
     ///
     /// https://learn.microsoft.com/en-us/rest/api/storageservices/append-block
-    pub fn azblob_append_blob_request(
+    fn azblob_append_blob_request(
         &self,
         path: &str,
         position: u64,
@@ -362,18 +394,32 @@ impl AzblobCore {
     ) -> Result<Request<Buffer>> {
         let url = format!("{}?comp=appendblock", &self.build_path_url(path));
 
-        let mut req = Request::put(&url);
+        let mut req = Request::put(&url)
+            .header(CONTENT_LENGTH, size)
+            .header(constants::X_MS_BLOB_CONDITION_APPENDPOS, position);
 
         // Set SSE headers.
         req = self.insert_sse_headers(req);
 
-        req = req.header(CONTENT_LENGTH, size);
-
-        req = req.header(constants::X_MS_BLOB_CONDITION_APPENDPOS, position);
-
-        let req = req.body(body).map_err(new_request_build_error)?;
+        let req = req
+            .extension(Operation::Write)
+            .body(body)
+            .map_err(new_request_build_error)?;
 
         Ok(req)
+    }
+
+    pub async fn azblob_append_blob(
+        &self,
+        path: &str,
+        position: u64,
+        size: u64,
+        body: Buffer,
+    ) -> Result<Response<Buffer>> {
+        let mut req = self.azblob_append_blob_request(path, position, size, body)?;
+
+        self.sign(&mut req).await?;
+        self.send(req).await
     }
 
     pub fn azblob_put_block_request(
@@ -408,8 +454,11 @@ impl AzblobCore {
         if let Some(ty) = args.content_type() {
             req = req.header(CONTENT_TYPE, ty)
         }
-        // Set body
-        let req = req.body(body).map_err(new_request_build_error)?;
+
+        let req = req
+            .extension(Operation::Write)
+            .body(body)
+            .map_err(new_request_build_error)?;
 
         Ok(req)
     }
@@ -428,7 +477,7 @@ impl AzblobCore {
         self.send(req).await
     }
 
-    pub fn azblob_complete_put_block_list_request(
+    fn azblob_complete_put_block_list_request(
         &self,
         path: &str,
         block_ids: Vec<Uuid>,
@@ -453,11 +502,12 @@ impl AzblobCore {
                 })
                 .collect(),
         })
-        .map_err(new_xml_deserialize_error)?;
+        .map_err(new_xml_serialize_error)?;
 
         req = req.header(CONTENT_LENGTH, content.len());
 
         let req = req
+            .extension(Operation::Write)
             .body(Buffer::from(Bytes::from(content)))
             .map_err(new_request_build_error)?;
 
@@ -491,7 +541,10 @@ impl AzblobCore {
             req = req.header(IF_MATCH, if_match);
         }
 
-        let req = req.body(Buffer::new()).map_err(new_request_build_error)?;
+        let req = req
+            .extension(Operation::Stat)
+            .body(Buffer::new())
+            .map_err(new_request_build_error)?;
 
         Ok(req)
     }
@@ -507,10 +560,10 @@ impl AzblobCore {
         self.send(req).await
     }
 
-    pub fn azblob_delete_blob_request(&self, path: &str) -> Result<Request<Buffer>> {
-        let req = Request::delete(self.build_path_url(path));
-
-        req.header(CONTENT_LENGTH, 0)
+    fn azblob_delete_blob_request(&self, path: &str) -> Result<Request<Buffer>> {
+        Request::delete(self.build_path_url(path))
+            .header(CONTENT_LENGTH, 0)
+            .extension(Operation::Delete)
             .body(Buffer::new())
             .map_err(new_request_build_error)
     }
@@ -529,6 +582,7 @@ impl AzblobCore {
         let mut req = Request::put(&target)
             .header(constants::X_MS_COPY_SOURCE, source)
             .header(CONTENT_LENGTH, 0)
+            .extension(Operation::Copy)
             .body(Buffer::new())
             .map_err(new_request_build_error)?;
 
@@ -562,6 +616,7 @@ impl AzblobCore {
         }
 
         let mut req = Request::get(url.finish())
+            .extension(Operation::List)
             .body(Buffer::new())
             .map_err(new_request_build_error)?;
 

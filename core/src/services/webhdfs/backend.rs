@@ -261,10 +261,6 @@ impl Access for WebhdfsBackend {
     type Writer = WebhdfsWriters;
     type Lister = oio::PageLister<WebhdfsLister>;
     type Deleter = oio::OneShotDeleter<WebhdfsDeleter>;
-    type BlockingReader = ();
-    type BlockingWriter = ();
-    type BlockingLister = ();
-    type BlockingDeleter = ();
 
     fn info(&self) -> Arc<AccessorInfo> {
         self.core.info.clone()
@@ -272,12 +268,9 @@ impl Access for WebhdfsBackend {
 
     /// Create a file or directory
     async fn create_dir(&self, path: &str, _: OpCreateDir) -> Result<RpCreateDir> {
-        let req = self.core.webhdfs_create_dir_request(path)?;
-
-        let resp = self.info().http_client().send(req).await?;
+        let resp = self.core.webhdfs_create_dir(path).await?;
 
         let status = resp.status();
-
         // WebHDFS's has a two-step create/append to prevent clients to send out
         // data before creating it.
         // According to the redirect policy of `reqwest` HTTP Client we are using,
@@ -339,7 +332,6 @@ impl Access for WebhdfsBackend {
         let resp = self.core.webhdfs_read_file(path, args.range()).await?;
 
         let status = resp.status();
-
         match status {
             StatusCode::OK | StatusCode::PARTIAL_CONTENT => {
                 Ok((RpRead::default(), resp.into_body()))

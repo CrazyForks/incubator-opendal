@@ -410,6 +410,24 @@ impl S3Builder {
         self
     }
 
+    /// Disable list objects v2 so that opendal will not use the older
+    /// List Objects V1 to list objects.
+    ///
+    /// By default, OpenDAL uses List Objects V2 to list objects. However,
+    /// some legacy services do not yet support V2.
+    pub fn disable_list_objects_v2(mut self) -> Self {
+        self.config.disable_list_objects_v2 = true;
+        self
+    }
+
+    /// Enable request payer so that OpenDAL will send requests with `x-amz-request-payer` header.
+    ///
+    /// With this option the client accepts to pay for the request and data transfer costs.
+    pub fn enable_request_payer(mut self) -> Self {
+        self.config.enable_request_payer = true;
+        self
+    }
+
     /// Disable load credential from ec2 metadata.
     ///
     /// This option is used to disable the default behavior of opendal
@@ -995,6 +1013,7 @@ impl Builder for S3Builder {
                 default_storage_class,
                 allow_anonymous: self.config.allow_anonymous,
                 disable_list_objects_v2: self.config.disable_list_objects_v2,
+                enable_request_payer: self.config.enable_request_payer,
                 signer,
                 loader,
                 credential_loaded: AtomicBool::new(false),
@@ -1015,10 +1034,6 @@ impl Access for S3Backend {
     type Writer = S3Writers;
     type Lister = S3Listers;
     type Deleter = oio::BatchDeleter<S3Deleter>;
-    type BlockingReader = ();
-    type BlockingWriter = ();
-    type BlockingLister = ();
-    type BlockingDeleter = ();
 
     fn info(&self) -> Arc<AccessorInfo> {
         self.core.info.clone()
@@ -1036,7 +1051,7 @@ impl Access for S3Backend {
 
                 let user_meta = parse_prefixed_headers(headers, X_AMZ_META_PREFIX);
                 if !user_meta.is_empty() {
-                    meta.with_user_metadata(user_meta);
+                    meta = meta.with_user_metadata(user_meta);
                 }
 
                 if let Some(v) = parse_header_to_str(headers, X_AMZ_VERSION_ID)? {

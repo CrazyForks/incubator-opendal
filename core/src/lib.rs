@@ -26,7 +26,7 @@
 //!
 //! # Quick Start
 //!
-//! OpenDAL's API entry points are [`Operator`] and [`BlockingOperator`]. All
+//! OpenDAL's API entry points are [`Operator`] and [`blocking::Operator`]. All
 //! public APIs are accessible through the operator. To utilize OpenDAL, you
 //! need to:
 //!
@@ -88,7 +88,7 @@
 //! ## Use operator
 //!
 //! The final step is to use the operator. OpenDAL supports both async [`Operator`]
-//! and blocking [`BlockingOperator`]. Please pick the one that fits your use case.
+//! and blocking [`blocking::Operator`]. Please pick the one that fits your use case.
 //!
 //! Every Operator API follows the same pattern, take `read` as an example:
 //!
@@ -124,6 +124,12 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! # Useful Links
+//!
+//! - [Concept][crate::docs::concepts]
+//! - [Internals][crate::docs::internals]
+//! - [Performance Guide][crate::docs::performance]
 
 // Make sure all our public APIs have docs.
 #![warn(missing_docs)]
@@ -133,6 +139,8 @@ mod types;
 pub use types::*;
 
 // Public modules, they will be accessed like `opendal::layers::Xxxx`
+#[cfg(feature = "blocking")]
+pub mod blocking;
 #[cfg(docsrs)]
 pub mod docs;
 pub mod layers;
@@ -148,6 +156,7 @@ mod tests {
     ///
     /// We assert our public structs here to make sure we don't introduce
     /// unexpected struct/enum size change.
+    #[cfg(target_pointer_width = "64")]
     #[test]
     fn assert_size() {
         assert_eq!(16, size_of::<Operator>());
@@ -165,10 +174,6 @@ mod tests {
     impl AssertSendSync for Writer {}
     impl AssertSendSync for Lister {}
     impl AssertSendSync for Operator {}
-    impl AssertSendSync for BlockingReader {}
-    impl AssertSendSync for BlockingWriter {}
-    impl AssertSendSync for BlockingLister {}
-    impl AssertSendSync for BlockingOperator {}
 
     /// This is used to make sure our public API implement Send + Sync
     #[test]
